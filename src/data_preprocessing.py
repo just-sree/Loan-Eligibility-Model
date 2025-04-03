@@ -1,45 +1,46 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
-from .logger import get_logger
+from sklearn.model_selection import train_test_split
+from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-def load_data(filepath):
+def load_and_process_data(filepath):
     try:
         df = pd.read_csv(filepath)
-        logger.info(f"Data loaded from {filepath} with shape {df.shape}")
-        return df
+        logger.info(f"Loaded dataset with shape: {df.shape}")
+        logger.info(f"Columns: {df.columns.tolist()}")
+
+        if 'Loan_ID' in df.columns:
+            df.drop(columns=['Loan_ID'], inplace=True)
+
+        if 'Loan_Approved' not in df.columns:
+            raise ValueError("Target column 'Loan_Approved' not found.")
+
+        df['Loan_Approved'] = df['Loan_Approved'].map({'Y': 1, 'N': 0})
+
+        # Handle missing values
+        fill_mode = ['Gender', 'Married', 'Dependents', 'Self_Employed', 'Loan_Amount_Term', 'Credit_History']
+        for col in fill_mode:
+            df[col].fillna(df[col].mode()[0], inplace=True)
+
+        df['LoanAmount'].fillna(df['LoanAmount'].median(), inplace=True)
+
+        logger.info("Missing values filled.")
+
+        df = pd.get_dummies(df, drop_first=True)
+        logger.info("Categorical variables encoded.")
+
+        X = df.drop('Loan_Approved', axis=1)
+        y = df['Loan_Approved']
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+        logger.info("Train-test split done.")
+
+        return X_train, X_test, y_train, y_test
+
     except Exception as e:
-        logger.error(f"Error loading data: {e}")
-        return None
-
-def preprocess_data(df, scale_numeric=False):
-    try:
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col].fillna(df[col].mode()[0], inplace=True)
-            else:
-                df[col].fillna(df[col].median(), inplace=True)
-
-        if 'Loan_Approved' in df.columns:
-            df['Loan_Approved'] = df['Loan_Approved'].map({'Y': 1, 'N': 0})
-
-        cat_cols = df.select_dtypes(include='object').columns.tolist()
-        if 'Loan_Approved' in cat_cols:
-            cat_cols.remove('Loan_Approved')
-
-        df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
-
-        if scale_numeric:
-            scaler = StandardScaler()
-            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            if 'Loan_Approved' in num_cols:
-                num_cols.remove('Loan_Approved')
-            df[num_cols] = scaler.fit_transform(df[num_cols])
-
-        logger.info("Preprocessing complete")
-        return df
-    except Exception as e:
-        logger.error(f"Preprocessing error: {e}")
-        return df
+        logger.exception(f"Data preprocessing failed: {e}")
+        raise
